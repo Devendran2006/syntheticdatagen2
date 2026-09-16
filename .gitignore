@@ -1,0 +1,28 @@
+# Generated outputs
+outputs/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Machine Learning models / checkpoints
+*.pth
+*.pt
+*.pkl
+
+# Environment / secrets
+.env
+
+# Temporary files
+*.tmp
+*.temp
+# Large datasets
+data/
+
+# Keep lightweight dataset documentation if needed
+!data/.gitkeep
+# Trained ML models
+*.h5
+
+# Generated project file listing
+project_files.txt
