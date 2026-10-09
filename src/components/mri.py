@@ -1,3 +1,4 @@
+
 """
 MRI Intelligence Dashboard
 --------------------------
@@ -13,6 +14,9 @@ It does NOT train a GAN and does NOT use real Testing images for training.
 
 import os
 import glob
+import io
+import json
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -24,18 +28,39 @@ from PIL import Image
 
 
 # =========================================================
-# THEME
+# DESIGN SYSTEM
 # =========================================================
 
-PRIMARY = "#1F2A44"
-SOFT_BLUE = "#6B8FB3"
-SOFT_TEAL = "#76A7A3"
-SOFT_GREEN = "#88A98F"
-SOFT_GOLD = "#C7A76B"
-SOFT_RED = "#C98585"
-SOFT_PURPLE = "#9A8FB7"
-LIGHT_BG = "#F7F9FC"
-LIGHT_GRID = "#E8ECF2"
+COLORS = {
+    "primary": "#0B5FA5",
+    "primary_dark": "#08406F",
+    "accent": "#12A594",
+    "accent_soft": "#E4F5F3",
+    "warning": "#D97706",
+    "danger": "#DC2626",
+    "success": "#059669",
+    "text": "#1F2A44",
+    "text_muted": "#5B6B85",
+    "border": "#E4E9F2",
+    "surface": "#FFFFFF",
+    "surface_alt": "#F6F8FC",
+}
+
+SERIES_COLOR_MAP = {
+    "Real": COLORS["primary"],
+    "Synthetic": COLORS["accent"],
+}
+
+CATEGORICAL_SEQUENCE = [
+    COLORS["primary"],
+    COLORS["accent"],
+    "#6D5DD3",
+    "#E08E45",
+    "#3AA6A6",
+    "#B0559A",
+    "#4C8DBF",
+    "#8C9EB2",
+]
 
 CLASSES = [
     "glioma",
@@ -52,10 +77,10 @@ CLASS_LABELS = {
 }
 
 CLASS_COLORS = {
-    "glioma": SOFT_RED,
-    "meningioma": SOFT_BLUE,
-    "notumor": SOFT_GREEN,
-    "pituitary": SOFT_GOLD,
+    "glioma": CATEGORICAL_SEQUENCE[4],
+    "meningioma": COLORS["primary"],
+    "notumor": COLORS["success"],
+    "pituitary": CATEGORICAL_SEQUENCE[3],
 }
 
 
@@ -107,105 +132,257 @@ V5_2_EVAL_RESULTS = Path(
     "outputs/mri/v5_2/ml_validation"
 )
 
+FINAL_SYNTHETIC_ROOT = Path(
+    "outputs/mri_testing_v5_6_production_800"
+)
+
+FINAL_EVIDENCE_ROOT = Path(
+    "outputs/mri_testing_v5_6_quality_evidence_800"
+)
+
 
 # =========================================================
-# HELPERS
+# STYLE HELPERS
 # =========================================================
 
-def section_header(title, description=None):
-    desc = ""
-    if description:
-        desc = (
-            f"<div style='color:#667085;font-size:13px;"
-            f"margin-top:4px;'>{description}</div>"
-        )
+def inject_custom_css():
+    """Inject safe dashboard styling."""
 
     st.markdown(
         f"""
-        <div style="
-            padding:4px 0 10px 0;
-            border-bottom:1px solid #E8ECF2;
-            margin-bottom:16px;
-        ">
-            <div style="
-                color:#1F2A44;
-                font-size:21px;
-                font-weight:700;
-            ">
-                {title}
-            </div>
-            {desc}
+        <style>
+
+        .hc-header {{
+            padding: 1.1rem 1.4rem;
+            border-radius: 14px;
+            background: linear-gradient(
+                135deg,
+                {COLORS["primary_dark"]} 0%,
+                {COLORS["primary"]} 55%,
+                {COLORS["accent"]} 100%
+            );
+            margin-bottom: 1.1rem;
+            box-shadow: 0 6px 18px rgba(11, 95, 165, 0.18);
+        }}
+
+        .hc-header h1 {{
+            margin: 0;
+            font-size: 1.55rem;
+            font-weight: 700;
+            color: #FFFFFF !important;
+        }}
+
+        .hc-header p {{
+            margin: 0.25rem 0 0 0;
+            font-size: 0.92rem;
+            color: rgba(255,255,255,0.88) !important;
+        }}
+
+        .hc-badge {{
+            display: inline-block;
+            padding: 0.18rem 0.6rem;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }}
+
+        .hc-badge-success {{
+            background: #E4F7EE;
+            color: {COLORS["success"]} !important;
+        }}
+
+        .hc-badge-warning {{
+            background: #FEF3E2;
+            color: {COLORS["warning"]} !important;
+        }}
+
+        .hc-badge-danger {{
+            background: #FDEAEA;
+            color: {COLORS["danger"]} !important;
+        }}
+
+        div[data-testid="stDataFrame"] {{
+            border: 1px solid rgba(128, 128, 128, 0.25);
+            border-radius: 10px;
+            overflow: hidden;
+        }}
+
+        div[data-testid="stExpander"] {{
+            border: 1px solid rgba(128, 128, 128, 0.25);
+            border-radius: 10px;
+        }}
+
+        div[data-testid="stVerticalBlockBorderWrapper"] {{
+            padding: 0.4rem 0.2rem;
+        }}
+
+        div[data-testid="column"] {{
+            padding: 0 0.35rem;
+        }}
+
+        div[data-testid="stDownloadButton"] button {{
+            background: {COLORS["primary"]} !important;
+            color: #FFFFFF !important;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+        }}
+
+        div[data-testid="stDownloadButton"] button:hover {{
+            background: {COLORS["primary_dark"]} !important;
+            color: #FFFFFF !important;
+        }}
+
+        /* Compact MRI gallery images */
+        .mri-gallery-card {{
+            border: 1px solid #E4E9F2;
+            border-radius: 10px;
+            padding: 0.35rem;
+            background: #FFFFFF;
+            margin-bottom: 0.7rem;
+        }}
+
+        .mri-gallery-caption {{
+            font-size: 0.72rem;
+            color: #5B6B85;
+            text-align: center;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-top: 0.25rem;
+        }}
+
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def section_header(title, description=None):
+    st.markdown(f"#### {title}")
+
+    if description:
+        st.caption(description)
+
+
+def page_header(title, subtitle):
+    st.markdown(
+        f"""
+        <div class="hc-header">
+            <h1>{title}</h1>
+            <p>{subtitle}</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
 
+def badge(text, kind="success"):
+    return (
+        f'<span class="hc-badge hc-badge-{kind}">{text}</span>'
+    )
+
+
 def metric_card(label, value, caption=None):
-    st.metric(label, value)
-    if caption:
-        st.caption(caption)
+    with st.container(border=True):
+        st.metric(label, value)
+
+        if caption:
+            st.caption(caption)
 
 
-def apply_chart_theme(fig, height=400, legend=True):
+def get_theme_type():
+    try:
+        return st.context.theme.type
+    except Exception:
+        return "light"
+
+
+def apply_chart_theme(fig, height=380, legend=True):
+
+    theme_type = get_theme_type()
+
+    if theme_type == "dark":
+        text_color = "#E7ECF7"
+        line_color = "rgba(255, 255, 255, 0.25)"
+    else:
+        text_color = COLORS["text"]
+        line_color = COLORS["border"]
+
     fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         font=dict(
-            family="Arial, sans-serif",
-            color=PRIMARY,
-            size=13,
+            color=text_color,
+            family="Segoe UI, Helvetica Neue, Arial, sans-serif",
+            size=12,
         ),
         title=dict(
             font=dict(
-                color=PRIMARY,
-                size=18,
+                color=text_color,
+                size=17,
+                family="Segoe UI, Helvetica Neue, Arial, sans-serif",
             ),
-            x=0.02,
+            x=0.01,
             xanchor="left",
         ),
         margin=dict(
-            l=25,
-            r=25,
-            t=70,
-            b=35,
+            l=20,
+            r=20,
+            t=55,
+            b=70,
         ),
-        height=height,
+        colorway=CATEGORICAL_SEQUENCE,
         hoverlabel=dict(
             bgcolor="white",
-            font_color=PRIMARY,
+            font_size=12,
+            font_family="Segoe UI, Helvetica Neue, Arial, sans-serif",
         ),
+        bargap=0.25,
+        height=height,
     )
 
     if legend:
         fig.update_layout(
             legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="left",
-                x=0,
                 bgcolor="rgba(0,0,0,0)",
+                font=dict(color=text_color),
+                orientation="h",
+                yanchor="top",
+                y=-0.22,
+                xanchor="center",
+                x=0.5,
             )
         )
+    else:
+        fig.update_layout(showlegend=False)
 
     fig.update_xaxes(
         showgrid=False,
         zeroline=False,
-        linecolor=LIGHT_GRID,
-        tickfont=dict(color=PRIMARY),
+        showline=True,
+        linecolor=line_color,
+        tickfont=dict(color=text_color),
+        title_font=dict(color=text_color),
     )
 
     fig.update_yaxes(
-        showgrid=True,
-        gridcolor=LIGHT_GRID,
-        gridwidth=1,
-        zeroline=False,
-        tickfont=dict(color=PRIMARY),
+        showgrid=False,
+        zeroline=True,
+        zerolinecolor=line_color,
+        zerolinewidth=1,
+        showline=True,
+        linecolor=line_color,
+        tickfont=dict(color=text_color),
+        title_font=dict(color=text_color),
     )
 
     return fig
 
+
+# =========================================================
+# FILE HELPERS
+# =========================================================
 
 def image_files(folder):
     if not folder.exists():
@@ -222,9 +399,7 @@ def image_files(folder):
     files = []
 
     for pattern in patterns:
-        files.extend(
-            folder.rglob(pattern)
-        )
+        files.extend(folder.rglob(pattern))
 
     return sorted(set(files))
 
@@ -233,8 +408,7 @@ def class_image_files(root):
     result = {}
 
     for cls in CLASSES:
-        folder = root / cls
-        result[cls] = image_files(folder)
+        result[cls] = image_files(root / cls)
 
     return result
 
@@ -253,6 +427,7 @@ def count_class_images(root):
 def find_csv(root, names):
     for name in names:
         path = root / name
+
         if path.exists():
             return path
 
@@ -279,9 +454,7 @@ def discover_evaluation_csvs():
                 root.rglob("*.csv")
             )
 
-    return sorted(
-        set(candidates)
-    )
+    return sorted(set(candidates))
 
 
 def infer_class_from_path(path):
@@ -317,6 +490,7 @@ def normalize_metric_column(name):
 
 @st.cache_data(show_spinner=False)
 def get_dataset_counts():
+
     train_counts = count_class_images(
         REAL_TRAIN
     )
@@ -339,6 +513,7 @@ def get_dataset_counts():
     synthetic_counts = {}
 
     for version, root in synthetic_sources.items():
+
         counts = count_class_images(root)
 
         if sum(counts.values()) > 0:
@@ -353,6 +528,61 @@ def get_dataset_counts():
 
 
 # =========================================================
+# OVERVIEW KPI CARDS
+# =========================================================
+
+def show_overview_kpis():
+    """
+    KPI cards moved from directly below the page header
+    into the Overview tab.
+    """
+
+    real_counts = count_class_images(
+        REAL_TEST
+    )
+
+    synthetic_counts, _ = get_final_production_counts()
+
+    real_total = sum(
+        real_counts.values()
+    )
+
+    synthetic_total = sum(
+        synthetic_counts.values()
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+
+    with c1:
+        metric_card(
+            "Real Samples",
+            f"{real_total:,}",
+            "MRI Testing dataset",
+        )
+
+    with c2:
+        metric_card(
+            "Synthetic Samples",
+            f"{synthetic_total:,}",
+            "Final V5.6 production",
+        )
+
+    with c3:
+        metric_card(
+            "Combined Samples",
+            f"{real_total + synthetic_total:,}",
+            "Real + synthetic",
+        )
+
+    with c4:
+        metric_card(
+            "MRI Classes",
+            "4",
+            "Glioma • Meningioma • No Tumor • Pituitary",
+        )
+
+
+# =========================================================
 # DATASET OVERVIEW
 # =========================================================
 
@@ -360,7 +590,7 @@ def show_dataset_overview():
 
     section_header(
         "📊 MRI Dataset Overview",
-        "Separate real training, real testing and generated synthetic data.",
+        "Separate real testing and generated synthetic data.",
     )
 
     (
@@ -385,6 +615,7 @@ def show_dataset_overview():
     latest_synthetic_total = 0
 
     if synthetic_counts:
+
         latest_version = list(
             synthetic_counts.keys()
         )[-1]
@@ -392,6 +623,7 @@ def show_dataset_overview():
         latest_synthetic_total = sum(
             synthetic_counts[latest_version].values()
         )
+
     else:
         latest_version = "None"
 
@@ -435,6 +667,7 @@ def show_dataset_overview():
     rows = []
 
     for cls in CLASSES:
+
         rows.append({
             "Class": CLASS_LABELS[cls],
             "Real Training": train_counts.get(cls, 0),
@@ -463,11 +696,7 @@ def show_dataset_overview():
         color="Dataset",
         barmode="group",
         text="Images",
-        color_discrete_sequence=[
-            PRIMARY,
-            SOFT_BLUE,
-            SOFT_GOLD,
-        ],
+        color_discrete_sequence=CATEGORICAL_SEQUENCE,
         title="MRI Images by Class and Dataset",
     )
 
@@ -493,6 +722,7 @@ def show_dataset_overview():
 # =========================================================
 
 def get_synthetic_versions():
+
     versions = {
         "V4": V4_SYNTHETIC,
         "V5": V5_SYNTHETIC,
@@ -503,6 +733,7 @@ def get_synthetic_versions():
     available = {}
 
     for version, path in versions.items():
+
         total = len(
             image_files(path)
         )
@@ -513,14 +744,18 @@ def get_synthetic_versions():
     return available
 
 
-def show_version_selector(key="mri_synthetic_version_selector"):
+def show_version_selector(
+    key="mri_synthetic_version_selector"
+):
 
     versions = get_synthetic_versions()
 
     if not versions:
+
         st.warning(
             "No evaluated synthetic MRI image folder was found."
         )
+
         return None
 
     version_names = list(
@@ -546,31 +781,20 @@ def show_version_selector(key="mri_synthetic_version_selector"):
 
 
 # =========================================================
-# REAL MRI GALLERY
+# REAL MRI TESTING GALLERY
 # =========================================================
 
 def show_real_gallery():
 
     section_header(
-        "🖼️ Real MRI Gallery",
-        "Browse the real MRI training/testing images class by class.",
+        "🖼️ Real MRI Testing Preview",
+        "Preview the untouched real MRI Testing images class by class.",
     )
 
-    source = st.radio(
-        "Image source",
-        [
-            "Training",
-            "Testing",
-        ],
-        horizontal=True,
-        key="mri_real_gallery_source",
-    )
-
-    root = (
-        REAL_TRAIN
-        if source == "Training"
-        else REAL_TEST
-    )
+    # IMPORTANT:
+    # Training option removed.
+    # Only REAL_TEST is displayed here.
+    root = REAL_TEST
 
     selected_class = st.selectbox(
         "MRI class",
@@ -584,18 +808,20 @@ def show_real_gallery():
     )
 
     if not files:
+
         st.info(
-            f"No {selected_class} images found."
+            f"No {CLASS_LABELS[selected_class]} testing images found."
         )
+
         return
 
     max_show = min(
         len(files),
-        16,
+        12,
     )
 
     sample_count = st.slider(
-        "Images to display",
+        "Testing images to display",
         min_value=4,
         max_value=max_show,
         value=min(8, max_show),
@@ -607,17 +833,19 @@ def show_real_gallery():
 
     cols = st.columns(4)
 
-    for index, path in enumerate(
-        selected_files
-    ):
+    for index, path in enumerate(selected_files):
+
         with cols[index % 4]:
+
             img = load_image(path)
 
             if img is not None:
+
+                # Fixed compact width prevents oversized MRI images.
                 st.image(
                     img,
                     caption=path.name,
-                    use_container_width=True,
+                    width=180,
                 )
 
 
@@ -628,8 +856,8 @@ def show_real_gallery():
 def show_synthetic_gallery(root):
 
     section_header(
-        "✨ Synthetic MRI Gallery",
-        "Inspect generated images independently for each brain MRI class.",
+        "✨ Synthetic MRI Preview",
+        "Preview the final V5.6 generated MRI images independently for each class.",
     )
 
     selected_class = st.selectbox(
@@ -644,14 +872,16 @@ def show_synthetic_gallery(root):
     )
 
     if not files:
+
         st.info(
             "No synthetic images found for this class."
         )
+
         return
 
     sample_count = min(
         len(files),
-        16,
+        12,
     )
 
     count = st.slider(
@@ -667,33 +897,36 @@ def show_synthetic_gallery(root):
 
     cols = st.columns(4)
 
-    for index, path in enumerate(
-        selected_files
-    ):
+    for index, path in enumerate(selected_files):
+
         with cols[index % 4]:
+
             img = load_image(path)
 
             if img is not None:
+
+                # Fixed compact width for dashboard fit.
                 st.image(
                     img,
                     caption=path.name,
-                    use_container_width=True,
+                    width=180,
                 )
 
     st.caption(
-        f"{len(files):,} synthetic {CLASS_LABELS[selected_class]} images available."
+        f"{len(files):,} synthetic "
+        f"{CLASS_LABELS[selected_class]} images available."
     )
 
 
 # =========================================================
-# SIDE BY SIDE COMPARISON
+# SIDE-BY-SIDE REAL VS SYNTHETIC IMAGE COMPARISON
 # =========================================================
 
 def show_image_comparison(root):
 
     section_header(
-        "🔄 Real vs Synthetic MRI",
-        "Compare images from the same class side by side.",
+        "🖼️ Real vs Synthetic MRI Image Comparison",
+        "Compare a real Testing MRI with a generated synthetic MRI from the same class.",
     )
 
     selected_class = st.selectbox(
@@ -703,8 +936,10 @@ def show_image_comparison(root):
         key="mri_side_compare_class",
     )
 
+    # IMPORTANT:
+    # Real source is Testing only.
     real_files = image_files(
-        REAL_TRAIN / selected_class
+        REAL_TEST / selected_class
     )
 
     synthetic_files = image_files(
@@ -712,55 +947,101 @@ def show_image_comparison(root):
     )
 
     if not real_files:
+
         st.warning(
-            "Real MRI images are unavailable for this class."
+            "Real MRI Testing images are unavailable for this class."
         )
+
         return
 
     if not synthetic_files:
+
         st.warning(
             "Synthetic MRI images are unavailable for this class."
         )
+
+        return
+
+    max_pairs = min(
+        len(real_files),
+        len(synthetic_files),
+    )
+
+    if max_pairs <= 0:
         return
 
     index = st.slider(
         "Image pair",
         min_value=0,
-        max_value=min(
-            len(real_files),
-            len(synthetic_files),
-        ) - 1,
+        max_value=max_pairs - 1,
         value=0,
         key="mri_pair_index",
     )
 
-    left, right = st.columns(2)
+    # -----------------------------------------------------
+    # Compact comparison layout
+    # -----------------------------------------------------
+
+    left, middle, right = st.columns(
+        [1, 0.12, 1]
+    )
 
     with left:
+
+        st.markdown(
+            f"**REAL — {CLASS_LABELS[selected_class]}**"
+        )
+
         real_img = load_image(
             real_files[index]
         )
 
         if real_img is not None:
+
+            # Compact fixed display size.
             st.image(
                 real_img,
-                caption=f"REAL — {real_files[index].name}",
-                use_container_width=True,
+                width=320,
             )
 
+            st.caption(
+                f"Testing • {real_files[index].name}"
+            )
+
+    with middle:
+
+        st.markdown(
+            "<div style='height:150px'></div>",
+            unsafe_allow_html=True,
+        )
+
+        st.markdown(
+            "<div style='text-align:center; "
+            "font-size:22px; color:#5B6B85;'>↔</div>",
+            unsafe_allow_html=True,
+        )
+
     with right:
+
+        st.markdown(
+            f"**SYNTHETIC — {CLASS_LABELS[selected_class]}**"
+        )
+
         synthetic_img = load_image(
             synthetic_files[index]
         )
 
         if synthetic_img is not None:
+
+            # Same size as real image.
             st.image(
                 synthetic_img,
-                caption=(
-                    f"SYNTHETIC — "
-                    f"{synthetic_files[index].name}"
-                ),
-                use_container_width=True,
+                width=320,
+            )
+
+            st.caption(
+                f"V5.6 Synthetic • "
+                f"{synthetic_files[index].name}"
             )
 
 
@@ -768,7 +1049,10 @@ def show_image_comparison(root):
 # PIXEL ANALYSIS
 # =========================================================
 
-def calculate_image_statistics(files, limit=200):
+def calculate_image_statistics(
+    files,
+    limit=200
+):
 
     means = []
     stds = []
@@ -782,10 +1066,13 @@ def calculate_image_statistics(files, limit=200):
         if img is None:
             continue
 
-        arr = np.asarray(
-            img,
-            dtype=np.float32,
-        ) / 255.0
+        arr = (
+            np.asarray(
+                img,
+                dtype=np.float32,
+            )
+            / 255.0
+        )
 
         means.append(
             float(arr.mean())
@@ -799,7 +1086,6 @@ def calculate_image_statistics(files, limit=200):
             float(arr.mean())
         )
 
-        # Simple gradient-based sharpness proxy.
         gx = np.diff(
             arr,
             axis=1,
@@ -847,9 +1133,11 @@ def show_pixel_analysis(root):
     )
 
     if not real_files or not synthetic_files:
+
         st.info(
             "Both real and synthetic images are required for this analysis."
         )
+
         return
 
     real_stats = calculate_image_statistics(
@@ -935,10 +1223,7 @@ def show_pixel_analysis(root):
             f"{CLASS_LABELS[selected_class]} — "
             "Pixel Mean Distribution"
         ),
-        color_discrete_map={
-            "Real": PRIMARY,
-            "Synthetic": SOFT_GOLD,
-        },
+        color_discrete_map=SERIES_COLOR_MAP,
     )
 
     fig = apply_chart_theme(
@@ -977,6 +1262,7 @@ def load_v4_evaluation():
     summary_df = None
 
     if detailed:
+
         try:
             detailed_df = pd.read_csv(
                 detailed
@@ -985,6 +1271,7 @@ def load_v4_evaluation():
             detailed_df = None
 
     if summary:
+
         try:
             summary_df = pd.read_csv(
                 summary
@@ -1005,9 +1292,11 @@ def show_v4_quality():
     detailed, summary = load_v4_evaluation()
 
     if detailed is None and summary is None:
+
         st.info(
             "V4 evaluation CSVs were not found."
         )
+
         return
 
     df = (
@@ -1036,14 +1325,15 @@ def show_v4_quality():
     ]
 
     if not available_metrics:
+
         st.dataframe(
             df,
             use_container_width=True,
             hide_index=True,
         )
+
         return
 
-    # Detect class column.
     class_column = None
 
     for candidate in [
@@ -1051,8 +1341,11 @@ def show_v4_quality():
         "category",
         "label",
     ]:
+
         if candidate in normalized:
+
             class_column = normalized[candidate]
+
             break
 
     if class_column is not None:
@@ -1123,13 +1416,7 @@ def show_v4_quality():
             barmode="group",
             text_auto=".1f",
             title="V4 Class-wise Quality Scores",
-            color_discrete_sequence=[
-                SOFT_BLUE,
-                SOFT_TEAL,
-                SOFT_GOLD,
-                SOFT_PURPLE,
-                SOFT_GREEN,
-            ],
+            color_discrete_sequence=CATEGORICAL_SEQUENCE,
         )
 
         fig.update_yaxes(
@@ -1153,6 +1440,7 @@ def show_v4_quality():
         )
 
     else:
+
         st.dataframe(
             df.round(3),
             use_container_width=True,
@@ -1178,7 +1466,9 @@ def find_ml_validation_files():
     ]
 
     for root in roots:
+
         if root.exists():
+
             candidates.extend(
                 root.rglob("*.csv")
             )
@@ -1195,6 +1485,7 @@ def load_ml_results():
     selected = []
 
     for path in files:
+
         name = path.name.lower()
 
         if any(
@@ -1206,6 +1497,7 @@ def load_ml_results():
                 "validation",
             ]
         ):
+
             selected.append(path)
 
     return selected
@@ -1237,9 +1529,11 @@ def show_ml_validation():
     files = load_ml_results()
 
     if not files:
+
         st.info(
             "No ML validation CSV files were found."
         )
+
         return
 
     rows = []
@@ -1263,8 +1557,11 @@ def show_ml_validation():
             "test_accuracy",
             "real_test_accuracy",
         ]:
+
             if candidate in normalized:
+
                 accuracy_col = normalized[candidate]
+
                 break
 
         if accuracy_col is None:
@@ -1280,32 +1577,42 @@ def show_ml_validation():
                 "model",
                 "dataset",
             ]:
+
                 if candidate in normalized:
+
                     experiment = str(
                         row[normalized[candidate]]
                     )
+
                     break
 
             try:
+
                 accuracy = float(
                     row[accuracy_col]
                 )
+
             except Exception:
+
                 continue
 
             rows.append({
                 "Version": classify_ml_file(path),
                 "Experiment": experiment,
-                "Accuracy": accuracy * 100
-                if accuracy <= 1
-                else accuracy,
+                "Accuracy": (
+                    accuracy * 100
+                    if accuracy <= 1
+                    else accuracy
+                ),
                 "Source": path.name,
             })
 
     if not rows:
+
         st.info(
             "ML validation files exist, but no compatible accuracy column was detected."
         )
+
         return
 
     results = pd.DataFrame(rows)
@@ -1317,7 +1624,10 @@ def show_ml_validation():
     )
 
     chart_results = results[
-        results["Experiment"].astype(str).str.len() > 0
+        results["Experiment"]
+        .astype(str)
+        .str.len()
+        > 0
     ]
 
     if not chart_results.empty:
@@ -1330,12 +1640,7 @@ def show_ml_validation():
             barmode="group",
             text="Accuracy",
             title="Synthetic MRI ML Utility",
-            color_discrete_sequence=[
-                SOFT_BLUE,
-                SOFT_TEAL,
-                SOFT_GOLD,
-                SOFT_PURPLE,
-            ],
+            color_discrete_sequence=CATEGORICAL_SEQUENCE,
         )
 
         fig.update_traces(
@@ -1374,12 +1679,18 @@ def show_class_quality():
 
     detailed, summary = load_v4_evaluation()
 
-    df = detailed if detailed is not None else summary
+    df = (
+        detailed
+        if detailed is not None
+        else summary
+    )
 
     if df is None:
+
         st.info(
             "No MRI quality evaluation data available."
         )
+
         return
 
     normalized = {
@@ -1394,16 +1705,21 @@ def show_class_quality():
         "category",
         "label",
     ]:
+
         if candidate in normalized:
+
             class_col = normalized[candidate]
+
             break
 
     if class_col is None:
+
         st.dataframe(
             df,
             use_container_width=True,
             hide_index=True,
         )
+
         return
 
     working = df.copy()
@@ -1417,7 +1733,9 @@ def show_class_quality():
         "overall_score",
         "overall_diagnostic_score",
     ]:
+
         if metric in normalized:
+
             rename[
                 normalized[metric]
             ] = metric
@@ -1439,18 +1757,21 @@ def show_class_quality():
     ]
 
     if not available:
+
         st.dataframe(
             working,
             use_container_width=True,
             hide_index=True,
         )
+
         return
 
     selected_class = st.selectbox(
         "Select MRI class",
         [
             "All Classes"
-        ] + [
+        ]
+        + [
             str(x)
             for x in working[class_col]
             .dropna()
@@ -1460,16 +1781,21 @@ def show_class_quality():
     )
 
     if selected_class != "All Classes":
+
         selected_df = working[
-            working[class_col].astype(str)
+            working[class_col]
+            .astype(str)
             == selected_class
         ]
+
     else:
+
         selected_df = working
 
     metric_rows = []
 
     for metric in available:
+
         values = pd.to_numeric(
             selected_df[metric],
             errors="coerce",
@@ -1499,7 +1825,9 @@ def show_class_quality():
     )
 
     for index, row in score_df.iterrows():
+
         with cols[index]:
+
             metric_card(
                 row["Metric"],
                 f"{row['Score']:.2f}%",
@@ -1514,10 +1842,12 @@ def show_class_quality():
             "MRI Quality Metrics — "
             f"{selected_class}"
         ),
+        color_discrete_sequence=[
+            COLORS["primary"]
+        ],
     )
 
     fig.update_traces(
-        marker_color=SOFT_BLUE,
         texttemplate="%{text:.1f}%",
         textposition="outside",
     )
@@ -1561,7 +1891,9 @@ def show_downloads():
     ]
 
     for root in roots:
+
         if root.exists():
+
             files.extend(
                 root.rglob("*.csv")
             )
@@ -1571,9 +1903,11 @@ def show_downloads():
     )
 
     if not files:
+
         st.info(
             "No evaluation CSV files available."
         )
+
         return
 
     for index, path in enumerate(files):
@@ -1594,138 +1928,1041 @@ def show_downloads():
 
 
 # =========================================================
-# MAIN DASHBOARD
+# FINAL V5.6 PRODUCTION DASHBOARD
 # =========================================================
 
-def show_mri_dashboard():
+def find_latest_final_production_run():
 
-    st.title(
-        "🧠 MRI Intelligence"
+    if not FINAL_SYNTHETIC_ROOT.exists():
+        return None
+
+    runs = [
+        p
+        for p in FINAL_SYNTHETIC_ROOT.iterdir()
+        if p.is_dir()
+        and p.name.startswith("production_800_")
+    ]
+
+    return (
+        max(
+            runs,
+            key=lambda p: p.stat().st_mtime,
+        )
+        if runs
+        else None
     )
+
+
+def find_latest_final_evidence_run():
+
+    if not FINAL_EVIDENCE_ROOT.exists():
+        return None
+
+    runs = [
+        p
+        for p in FINAL_EVIDENCE_ROOT.iterdir()
+        if p.is_dir()
+        and p.name.startswith("validation_")
+    ]
+
+    return (
+        max(
+            runs,
+            key=lambda p: p.stat().st_mtime,
+        )
+        if runs
+        else None
+    )
+
+
+def get_final_production_counts():
+
+    run = find_latest_final_production_run()
+
+    if run is None:
+        return {
+            cls: 0
+            for cls in CLASSES
+        }, None
+
+    counts = {
+        cls: len(
+            image_files(run / cls)
+        )
+        for cls in CLASSES
+    }
+
+    if sum(counts.values()) == 0:
+
+        root = run / "synthetic"
+
+        counts = {
+            cls: len(
+                image_files(root / cls)
+            )
+            for cls in CLASSES
+        }
+
+    return counts, run
+
+
+def get_final_evidence_files():
+
+    run = find_latest_final_evidence_run()
+
+    if run is None:
+        return None, None, None, None
+
+    html_path = (
+        run
+        / "mri_v5_6_quality_evidence_800_report.html"
+    )
+
+    json_path = (
+        run
+        / "reports"
+        / "v5_6_quality_evidence_800_report.json"
+    )
+
+    csv_path = (
+        run
+        / "reports"
+        / "v5_6_class_summary_800.csv"
+    )
+
+    return (
+        html_path if html_path.exists() else None,
+        json_path if json_path.exists() else None,
+        csv_path if csv_path.exists() else None,
+        run,
+    )
+
+
+def load_final_quality_summary():
+
+    _, _, csv_path, evidence_run = (
+        get_final_evidence_files()
+    )
+
+    if csv_path is None:
+        return None, evidence_run
+
+    try:
+        df = pd.read_csv(csv_path)
+    except Exception:
+        return None, evidence_run
+
+    if df.empty:
+        return None, evidence_run
+
+    normalized = {
+        normalize_metric_column(col): col
+        for col in df.columns
+    }
+
+    def find_column(candidates):
+
+        for candidate in candidates:
+
+            if candidate in normalized:
+
+                return normalized[candidate]
+
+        return None
+
+    class_col = find_column([
+        "class",
+        "category",
+        "label",
+        "mri_class",
+    ])
+
+    score_col = find_column([
+        "score",
+        "quality_score",
+        "overall_score",
+        "quality",
+    ])
+
+    hist_col = find_column([
+        "hist",
+        "hist_score",
+        "histogram",
+        "histogram_score",
+        "histogram_similarity",
+    ])
+
+    struct_col = find_column([
+        "struct",
+        "struct_score",
+        "structural",
+        "structural_score",
+        "structural_similarity",
+    ])
+
+    robust_z_col = find_column([
+        "robust_z",
+        "robust_z_score",
+    ])
+
+    q95_col = find_column([
+        "q95_exceed",
+        "q95_exceedance",
+        "q95_exceed_pct",
+    ])
+
+    status_col = find_column([
+        "status",
+        "result",
+        "validation_status",
+    ])
+
+    rename = {}
+
+    for source, target in [
+        (class_col, "Class"),
+        (score_col, "Quality Score"),
+        (hist_col, "Histogram Score"),
+        (struct_col, "Structural Score"),
+        (robust_z_col, "Robust Z"),
+        (q95_col, "Q95 Exceedance"),
+        (status_col, "Status"),
+    ]:
+
+        if source:
+            rename[source] = target
+
+    working = df.rename(
+        columns=rename
+    ).copy()
+
+    if (
+        "Class" not in working.columns
+        and len(working) == len(CLASSES)
+    ):
+
+        working["Class"] = CLASSES
+
+    if "Class" in working.columns:
+
+        working["Class"] = (
+            working["Class"]
+            .astype(str)
+            .str.lower()
+        )
+
+        working["Class"] = (
+            working["Class"]
+            .replace(CLASS_LABELS)
+        )
+
+    for col in [
+        "Quality Score",
+        "Histogram Score",
+        "Structural Score",
+        "Robust Z",
+        "Q95 Exceedance",
+    ]:
+
+        if col in working.columns:
+
+            working[col] = pd.to_numeric(
+                working[col],
+                errors="coerce",
+            )
+
+    return working, evidence_run
+
+
+def show_final_quality_evidence():
+
+    section_header(
+        "🧪 Final V5.6 Quality Evidence",
+        "Evidence that generated MRI data remains consistent with the real MRI distribution and structure.",
+    )
+
+    st.info(
+        "These are synthetic-data quality, similarity and consistency metrics. "
+        "They are engineering/ML evidence only — not medical accuracy, "
+        "clinical validation or diagnostic proof."
+    )
+
+    df, evidence_run = (
+        load_final_quality_summary()
+    )
+
+    if evidence_run is None:
+
+        st.warning(
+            "Final V5.6 quality-evidence output was not found."
+        )
+
+        return
+
+    if df is None:
+
+        st.warning(
+            "The final quality-evidence CSV could not be read."
+        )
+
+        return
+
+    status_values = []
+
+    if "Status" in df.columns:
+
+        status_values = (
+            df["Status"]
+            .dropna()
+            .astype(str)
+            .str.upper()
+            .tolist()
+        )
+
+    passed = (
+        sum(
+            "PASS" in value
+            for value in status_values
+        )
+        if status_values
+        else None
+    )
+
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
+
+        metric_card(
+            "Evidence Classes",
+            f"{len(df):,}",
+            "Final V5.6 class-wise evidence",
+        )
+
+    with c2:
+
+        metric_card(
+            "Classes Passed",
+            (
+                f"{passed:,}/{len(df):,}"
+                if passed is not None
+                else "Available"
+            ),
+            (
+                "Final evidence result"
+                if passed is not None
+                else "Status field not present"
+            ),
+        )
+
+    with c3:
+
+        metric_card(
+            "Evidence Type",
+            "Engineering",
+            "Similarity + consistency",
+        )
+
+    display_cols = [
+        col
+        for col in [
+            "Class",
+            "Quality Score",
+            "Histogram Score",
+            "Structural Score",
+            "Robust Z",
+            "Q95 Exceedance",
+            "Status",
+        ]
+        if col in df.columns
+    ]
+
+    if display_cols:
+
+        display_df = df[
+            display_cols
+        ].copy()
+
+        for col in [
+            "Quality Score",
+            "Histogram Score",
+            "Structural Score",
+        ]:
+
+            if col in display_df.columns:
+
+                values = pd.to_numeric(
+                    display_df[col],
+                    errors="coerce",
+                )
+
+                if (
+                    not values.dropna().empty
+                    and values.dropna().max() <= 1
+                ):
+
+                    display_df[col] = (
+                        values * 100
+                    )
+
+        st.dataframe(
+            display_df.round(3),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    metric_cols = [
+        col
+        for col in [
+            "Quality Score",
+            "Histogram Score",
+            "Structural Score",
+        ]
+        if col in df.columns
+    ]
+
+    if (
+        metric_cols
+        and "Class" in df.columns
+    ):
+
+        chart_df = df[
+            ["Class"] + metric_cols
+        ].melt(
+            id_vars="Class",
+            value_vars=metric_cols,
+            var_name="Metric",
+            value_name="Score",
+        )
+
+        chart_df["Score"] = pd.to_numeric(
+            chart_df["Score"],
+            errors="coerce",
+        )
+
+        if (
+            not chart_df.empty
+            and not chart_df["Score"]
+            .dropna()
+            .empty
+        ):
+
+            if (
+                chart_df["Score"]
+                .dropna()
+                .max()
+                <= 1
+            ):
+
+                chart_df["Score"] = (
+                    chart_df["Score"]
+                    * 100
+                )
+
+            fig = px.bar(
+                chart_df,
+                x="Class",
+                y="Score",
+                color="Metric",
+                barmode="group",
+                text="Score",
+                title=(
+                    "Final V5.6 Synthetic Quality "
+                    "Evidence by Class"
+                ),
+                color_discrete_sequence=(
+                    CATEGORICAL_SEQUENCE
+                ),
+            )
+
+            fig.update_traces(
+                texttemplate="%{text:.1f}%",
+                textposition="outside",
+                cliponaxis=False,
+            )
+
+            fig.update_yaxes(
+                title="Evidence Score (%)",
+                range=[0, 100],
+            )
+
+            fig = apply_chart_theme(
+                fig,
+                height=450,
+            )
+
+            st.plotly_chart(
+                fig,
+                use_container_width=True,
+                key="mri_final_quality_evidence_chart",
+            )
 
     st.caption(
-        "Brain MRI synthetic-data generation, "
-        "visual inspection, quality analysis and ML utility."
+        f"Evidence source: `{evidence_run}`"
     )
 
-    # -----------------------------------------------------
-    # HEADER KPIs
-    # -----------------------------------------------------
 
-    (
-        train_counts,
-        preprocessed_counts,
-        test_counts,
-        synthetic_counts,
-    ) = get_dataset_counts()
+# =========================================================
+# FINAL DATASET COMPARISON
+# =========================================================
 
-    train_total = sum(
-        train_counts.values()
+def show_final_dataset_comparison():
+
+    section_header(
+        "🔄 Real vs Synthetic Dataset Comparison",
+        "Final V5.6 production counts compared with the real MRI Testing set.",
     )
 
-    test_total = sum(
-        test_counts.values()
+    real_counts = count_class_images(
+        REAL_TEST
     )
 
-    preprocessed_total = sum(
-        preprocessed_counts.values()
+    synthetic_counts, production_run = (
+        get_final_production_counts()
+    )
+
+    rows = []
+
+    for cls in CLASSES:
+
+        real_count = real_counts.get(
+            cls,
+            0,
+        )
+
+        synthetic_count = synthetic_counts.get(
+            cls,
+            0,
+        )
+
+        expansion = (
+            synthetic_count / real_count
+            if real_count
+            else 0
+        )
+
+        rows.append({
+            "Class": CLASS_LABELS[cls],
+            "Real Testing": real_count,
+            "Synthetic Generated": synthetic_count,
+            "Total": (
+                real_count
+                + synthetic_count
+            ),
+            "Expansion": (
+                f"{expansion:.1f}×"
+                if real_count
+                else "—"
+            ),
+        })
+
+    comparison_df = pd.DataFrame(
+        rows
+    )
+
+    total_real = int(
+        comparison_df[
+            "Real Testing"
+        ].sum()
+    )
+
+    total_synthetic = int(
+        comparison_df[
+            "Synthetic Generated"
+        ].sum()
     )
 
     c1, c2, c3, c4 = st.columns(4)
 
     with c1:
+
         metric_card(
-            "MRI Classes",
-            "4",
-            "Glioma • Meningioma • No Tumor • Pituitary",
+            "Real Samples",
+            f"{total_real:,}",
+            "Existing MRI Testing images",
         )
 
     with c2:
+
         metric_card(
-            "Real Training",
-            f"{train_total:,}",
-            "GAN training data",
+            "Synthetic Samples",
+            f"{total_synthetic:,}",
+            "Final V5.6 generated images",
         )
 
     with c3:
+
         metric_card(
-            "Real Testing",
-            f"{test_total:,}",
-            "Evaluation only",
+            "Combined Samples",
+            f"{total_real + total_synthetic:,}",
+            "Real + synthetic",
         )
 
     with c4:
+
+        expansion = (
+            total_synthetic / total_real
+            if total_real
+            else 0
+        )
+
         metric_card(
-            "128×128",
-            "Grayscale",
-            "Preprocessed MRI format",
+            "Synthetic Expansion",
+            f"{expansion:.1f}×",
+            "Relative to real Testing",
+        )
+
+    st.dataframe(
+        comparison_df,
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    chart_df = comparison_df.melt(
+        id_vars="Class",
+        value_vars=[
+            "Real Testing",
+            "Synthetic Generated",
+        ],
+        var_name="Dataset",
+        value_name="Images",
+    )
+
+    fig = px.bar(
+        chart_df,
+        x="Class",
+        y="Images",
+        color="Dataset",
+        barmode="group",
+        text="Images",
+        title="Real vs Synthetic MRI Images by Class",
+        color_discrete_map=SERIES_COLOR_MAP,
+    )
+
+    fig.update_traces(
+        textposition="outside",
+        cliponaxis=False,
+    )
+
+    fig = apply_chart_theme(
+        fig,
+        height=440,
+    )
+
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        key="mri_final_real_vs_synthetic",
+    )
+
+    if production_run is not None:
+
+        st.caption(
+            f"Production source: `{production_run}`"
+        )
+
+
+# =========================================================
+# ZIP DOWNLOAD HELPERS
+# =========================================================
+
+def zip_image_dataset(
+    root,
+    include_real=False
+):
+
+    buffer = io.BytesIO()
+
+    with zipfile.ZipFile(
+        buffer,
+        mode="w",
+        compression=zipfile.ZIP_DEFLATED,
+        compresslevel=6,
+    ) as archive:
+
+        for cls in CLASSES:
+
+            for path in image_files(
+                root / cls
+            ):
+
+                archive.write(
+                    path,
+                    arcname=(
+                        f"synthetic/"
+                        f"{cls}/"
+                        f"{path.name}"
+                    ),
+                )
+
+        if include_real:
+
+            for cls in CLASSES:
+
+                for path in image_files(
+                    REAL_TEST / cls
+                ):
+
+                    archive.write(
+                        path,
+                        arcname=(
+                            f"real/"
+                            f"{cls}/"
+                            f"{path.name}"
+                        ),
+                    )
+
+    buffer.seek(0)
+
+    return buffer.getvalue()
+
+
+@st.cache_data(show_spinner=False)
+def get_synthetic_zip(
+    root_string
+):
+
+    return zip_image_dataset(
+        Path(root_string),
+        include_real=False,
+    )
+
+
+@st.cache_data(show_spinner=False)
+def get_real_and_synthetic_zip(
+    root_string
+):
+
+    return zip_image_dataset(
+        Path(root_string),
+        include_real=True,
+    )
+
+
+# =========================================================
+# FINAL DOWNLOADS
+# =========================================================
+
+def show_final_downloads():
+
+    section_header(
+        "⬇️ MRI Data & Quality Evidence Downloads",
+        "Download the final V5.6 synthetic dataset, real + synthetic package, and validation evidence.",
+    )
+
+    production_run = (
+        find_latest_final_production_run()
+    )
+
+    if production_run is None:
+
+        st.warning(
+            "Final V5.6 production images were not found."
+        )
+
+        return
+
+    html_path, json_path, csv_path, _ = (
+        get_final_evidence_files()
+    )
+
+    synthetic_root = production_run
+
+    if sum(
+        len(
+            image_files(
+                synthetic_root / cls
+            )
+        )
+        for cls in CLASSES
+    ) == 0:
+
+        synthetic_root = (
+            production_run
+            / "synthetic"
+        )
+
+    c1, c2 = st.columns(2)
+
+    with c1:
+
+        st.markdown(
+            "**Synthetic dataset**"
+        )
+
+        st.caption(
+            "Final V5.6 synthetic MRI images — 800 per class."
+        )
+
+        synthetic_data = (
+            get_synthetic_zip(
+                str(synthetic_root)
+            )
+        )
+
+        st.download_button(
+            "⬇️ Download Synthetic MRI Dataset",
+            data=synthetic_data,
+            file_name=(
+                "mri_v5_6_synthetic_3200.zip"
+            ),
+            mime="application/zip",
+            use_container_width=True,
+            key="mri_download_synthetic_3200",
+        )
+
+    with c2:
+
+        st.markdown(
+            "**Real + synthetic dataset**"
+        )
+
+        st.caption(
+            "Real MRI Testing images plus the final V5.6 synthetic dataset."
+        )
+
+        combined_data = (
+            get_real_and_synthetic_zip(
+                str(synthetic_root)
+            )
+        )
+
+        st.download_button(
+            "⬇️ Download Real + Synthetic MRI Dataset",
+            data=combined_data,
+            file_name=(
+                "mri_real_1600_plus_synthetic_3200.zip"
+            ),
+            mime="application/zip",
+            use_container_width=True,
+            key="mri_download_real_synthetic_4800",
         )
 
     st.divider()
 
+    section_header(
+        "📄 Quality Evidence Files",
+        "Final V5.6 engineering/ML quality evidence.",
+    )
+
+    evidence_cols = st.columns(3)
+
+    with evidence_cols[0]:
+
+        if html_path:
+
+            st.download_button(
+                "⬇️ HTML Report",
+                data=html_path.read_bytes(),
+                file_name=html_path.name,
+                mime="text/html",
+                use_container_width=True,
+                key="mri_download_final_html",
+            )
+
+        else:
+
+            st.caption(
+                "HTML report unavailable."
+            )
+
+    with evidence_cols[1]:
+
+        if json_path:
+
+            st.download_button(
+                "⬇️ JSON Report",
+                data=json_path.read_bytes(),
+                file_name=json_path.name,
+                mime="application/json",
+                use_container_width=True,
+                key="mri_download_final_json",
+            )
+
+        else:
+
+            st.caption(
+                "JSON report unavailable."
+            )
+
+    with evidence_cols[2]:
+
+        if csv_path:
+
+            st.download_button(
+                "⬇️ Class Summary CSV",
+                data=csv_path.read_bytes(),
+                file_name=csv_path.name,
+                mime="text/csv",
+                use_container_width=True,
+                key="mri_download_final_csv",
+            )
+
+        else:
+
+            st.caption(
+                "CSV report unavailable."
+            )
+
+
+# =========================================================
+# MAIN DASHBOARD
+# =========================================================
+
+def show_mri_dashboard():
+
+    inject_custom_css()
+
     # -----------------------------------------------------
-    # NAVIGATION
+    # PAGE HEADER
+    # -----------------------------------------------------
+    # KPI cards intentionally removed from here.
+    # They now appear at the top of Overview.
+    # -----------------------------------------------------
+
+    page_header(
+        "🧠 MRI Intelligence",
+        "Brain MRI synthetic-data generation, quality evidence and real-vs-synthetic dataset analysis.",
+    )
+
+    st.divider()
+
+    # -----------------------------------------------------
+    # FOUR MAIN TABS
     # -----------------------------------------------------
 
     tabs = st.tabs([
         "📊 Overview",
-        "🖼️ Real MRI",
-        "✨ Synthetic MRI",
         "🔄 Real vs Synthetic",
-        "🔬 Image Analysis",
-        "📈 GAN Quality",
-        "🤖 ML Utility",
-        "🧩 Class Quality",
-        "⬇️ Outputs",
+        "🧪 Quality Evidence",
+        "⬇️ Downloads",
     ])
 
-    with tabs[0]:
-        show_dataset_overview()
+    # =====================================================
+    # OVERVIEW
+    # =====================================================
 
-    with tabs[1]:
+    with tabs[0]:
+
+        # KPI CARDS MOVED HERE
+        show_overview_kpis()
+
+        st.divider()
+
+        # -------------------------------------------------
+        # REAL TESTING PREVIEW
+        # -------------------------------------------------
+
         show_real_gallery()
 
-    with tabs[2]:
-        root = show_version_selector("mri_synthetic_version_gallery")
+        st.divider()
 
-        if root is not None:
+        # -------------------------------------------------
+        # FINAL SYNTHETIC PREVIEW
+        # -------------------------------------------------
+
+        synthetic_root = (
+            find_latest_final_production_run()
+        )
+
+        if synthetic_root is not None:
+
+            if sum(
+                len(
+                    image_files(
+                        synthetic_root / cls
+                    )
+                )
+                for cls in CLASSES
+            ) == 0:
+
+                synthetic_root = (
+                    synthetic_root
+                    / "synthetic"
+                )
+
             show_synthetic_gallery(
-                root
+                synthetic_root
             )
+
+        else:
+
+            st.warning(
+                "Final V5.6 production images were not found."
+            )
+
+    # =====================================================
+    # REAL VS SYNTHETIC
+    # =====================================================
+
+    with tabs[1]:
+
+        synthetic_root = (
+            find_latest_final_production_run()
+        )
+
+        if synthetic_root is not None:
+
+            if sum(
+                len(
+                    image_files(
+                        synthetic_root / cls
+                    )
+                )
+                for cls in CLASSES
+            ) == 0:
+
+                synthetic_root = (
+                    synthetic_root
+                    / "synthetic"
+                )
+
+            # -------------------------------------------------
+            # DATASET COUNT COMPARISON
+            # -------------------------------------------------
+
+            show_final_dataset_comparison()
+
+            st.divider()
+
+            # -------------------------------------------------
+            # IMAGE-LEVEL COMPARISON
+            # -------------------------------------------------
+
+            show_image_comparison(
+                synthetic_root
+            )
+
+        else:
+
+            st.warning(
+                "Final V5.6 production images were not found."
+            )
+
+    # =====================================================
+    # QUALITY EVIDENCE
+    # =====================================================
+
+    with tabs[2]:
+
+        show_final_quality_evidence()
+
+    # =====================================================
+    # DOWNLOADS
+    # =====================================================
 
     with tabs[3]:
-        root = show_version_selector("mri_synthetic_version_comparison")
 
-        if root is not None:
-            show_image_comparison(
-                root
-            )
+        show_final_downloads()
 
-    with tabs[4]:
-        root = show_version_selector("mri_synthetic_version_analysis")
-
-        if root is not None:
-            show_pixel_analysis(
-                root
-            )
-
-    with tabs[5]:
-        show_v4_quality()
-
-    with tabs[6]:
-        show_ml_validation()
-
-    with tabs[7]:
-        show_class_quality()
-
-    with tabs[8]:
-        show_downloads()
+    # =====================================================
+    # DISCLAIMER
+    # =====================================================
 
     st.divider()
 
     st.info(
         "⚠️ MRI quality metrics shown here are engineering and ML "
-        "evaluation metrics. They do not establish medical realism, "
+        "evaluation evidence. They do not establish medical realism, "
         "clinical validity or diagnostic safety."
     )
 

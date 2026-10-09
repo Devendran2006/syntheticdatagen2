@@ -1,7 +1,7 @@
-
-import streamlit as st
-import pandas as pd
 import os
+import pandas as pd
+import numpy as np
+import streamlit as st
 import plotly.express as px
 
 
@@ -21,6 +21,255 @@ LARGE_SYNTHETIC_PATH = "data/banking/synthetic_banking_large.csv"
 EXPANDED_PATH = "data/banking/banking_expanded.csv"
 
 COMPARISON_PATH = "data/banking/comparison"
+
+
+# =========================================================
+# DESIGN SYSTEM
+# =========================================================
+# Same consistent professional palette used everywhere across the
+# suite — KPI cards, section headers, chart colorways and badges.
+
+COLORS = {
+    "primary": "#0B5FA5",      # deep clinical blue
+    "primary_dark": "#08406F",
+    "accent": "#12A594",       # teal accent
+    "accent_soft": "#E4F5F3",
+    "warning": "#D97706",
+    "danger": "#DC2626",
+    "success": "#059669",
+    "text": "#1F2A44",
+    "text_muted": "#5B6B85",
+    "border": "#E4E9F2",
+    "surface": "#FFFFFF",
+    "surface_alt": "#F6F8FC",
+}
+
+# Consistent series colors so "Real" vs "Synthetic" always render the
+# same way across every chart in the dashboard.
+SERIES_COLOR_MAP = {
+    "Real": COLORS["primary"],
+    "Synthetic": COLORS["accent"],
+}
+
+CATEGORICAL_SEQUENCE = [
+    COLORS["primary"],
+    COLORS["accent"],
+    "#6D5DD3",
+    "#E08E45",
+    "#3AA6A6",
+    "#B0559A",
+    "#4C8DBF",
+    "#8C9EB2",
+]
+
+
+def inject_custom_css():
+    """Injects only *safe* styling — never overrides text color, so it
+    always stays correct in both light and dark Streamlit themes."""
+
+    st.markdown(
+        f"""
+        <style>
+        /* ---- Page header banner (fixed white text on a colored
+             gradient — safe in any theme because the background
+             itself is always dark enough) ---- */
+        .hc-header {{
+            padding: 1.1rem 1.4rem;
+            border-radius: 14px;
+            background: linear-gradient(135deg, {COLORS["primary_dark"]} 0%, {COLORS["primary"]} 55%, {COLORS["accent"]} 100%);
+            margin-bottom: 1.1rem;
+            box-shadow: 0 6px 18px rgba(11, 95, 165, 0.18);
+        }}
+        .hc-header h1 {{
+            margin: 0;
+            font-size: 1.55rem;
+            font-weight: 700;
+            color: #FFFFFF !important;
+        }}
+        .hc-header p {{
+            margin: 0.25rem 0 0 0;
+            font-size: 0.92rem;
+            color: rgba(255,255,255,0.88) !important;
+        }}
+
+        /* ---- Badge (fixed pastel bg + fixed dark text — legible on
+             both themes since the badge carries its own background) ---- */
+        .hc-badge {{
+            display: inline-block;
+            padding: 0.18rem 0.6rem;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }}
+        .hc-badge-success {{ background: #E4F7EE; color: {COLORS["success"]} !important; }}
+        .hc-badge-warning {{ background: #FEF3E2; color: {COLORS["warning"]} !important; }}
+        .hc-badge-danger  {{ background: #FDEAEA; color: {COLORS["danger"]} !important; }}
+
+        /* ---- Dataframe / expander polish (border only, no text color) ---- */
+        div[data-testid="stDataFrame"] {{
+            border: 1px solid rgba(128, 128, 128, 0.25);
+            border-radius: 10px;
+            overflow: hidden;
+        }}
+
+        div[data-testid="stExpander"] {{
+            border: 1px solid rgba(128, 128, 128, 0.25);
+            border-radius: 10px;
+        }}
+
+        /* ---- KPI card spacing (border container already themed
+             correctly by Streamlit — just add breathing room) ---- */
+        div[data-testid="stVerticalBlockBorderWrapper"] {{
+            padding: 0.4rem 0.2rem;
+        }}
+
+        div[data-testid="column"] {{
+            padding: 0 0.35rem;
+        }}
+
+        /* ---- Download buttons (brand color, explicit white text) ---- */
+        div[data-testid="stDownloadButton"] button {{
+            background: {COLORS["primary"]} !important;
+            color: #FFFFFF !important;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+        }}
+        div[data-testid="stDownloadButton"] button:hover {{
+            background: {COLORS["primary_dark"]} !important;
+            color: #FFFFFF !important;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def section_title(icon, title, caption=None):
+    """Section header using Streamlit's own heading — always theme-correct."""
+
+    st.markdown(f"#### {icon} {title}")
+
+    if caption:
+        st.caption(caption)
+
+
+def page_header(title, subtitle):
+    st.markdown(
+        f"""
+        <div class="hc-header">
+            <h1>{title}</h1>
+            <p>{subtitle}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def badge(text, kind="success"):
+    return f'<span class="hc-badge hc-badge-{kind}">{text}</span>'
+
+
+# =========================================================
+# CHART THEME
+# =========================================================
+
+def apply_banking_chart_theme(fig):
+
+    theme_type = get_theme_type()
+
+    if theme_type == "dark":
+        text_color = "#E7ECF7"
+        line_color = "rgba(255, 255, 255, 0.25)"
+    else:
+        text_color = COLORS["text"]
+        line_color = COLORS["border"]
+
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(
+            color=text_color,
+            family="Segoe UI, Helvetica Neue, Arial, sans-serif",
+            size=12,
+        ),
+        title=dict(
+            font=dict(
+                color=text_color,
+                size=17,
+                family="Segoe UI, Helvetica Neue, Arial, sans-serif",
+            ),
+            x=0.01,
+            xanchor="left",
+        ),
+        legend=dict(
+            bgcolor="rgba(0,0,0,0)",
+            font=dict(color=text_color),
+            orientation="h",
+            yanchor="top",
+            y=-0.22,
+            xanchor="center",
+            x=0.5,
+        ),
+        margin=dict(
+            l=20,
+            r=20,
+            t=55,
+            b=70
+        ),
+        colorway=CATEGORICAL_SEQUENCE,
+        hoverlabel=dict(
+            bgcolor="white",
+            font_size=12,
+            font_family="Segoe UI, Helvetica Neue, Arial, sans-serif",
+        ),
+        bargap=0.25,
+        height=380,
+    )
+
+    fig.update_xaxes(
+        showgrid=False,
+        zeroline=False,
+        showline=True,
+        linecolor=line_color,
+        tickfont=dict(color=text_color),
+        title_font=dict(color=text_color),
+    )
+
+    fig.update_yaxes(
+        showgrid=False,
+        zeroline=True,
+        zerolinecolor=line_color,
+        zerolinewidth=1,
+        showline=True,
+        linecolor=line_color,
+        tickfont=dict(color=text_color),
+        title_font=dict(color=text_color),
+    )
+
+    return fig
+
+
+def get_theme_type():
+    """Detects whether Streamlit is currently rendering in light or dark
+    mode, so chart text/axis colors can be switched to stay visible."""
+
+    try:
+        return st.context.theme.type
+    except Exception:
+        return "light"
+
+
+def apply_series_colors(fig, df, color_col="Dataset"):
+    """Force 'Real' / 'Synthetic' series to consistent brand colors, when present."""
+
+    if color_col in df.columns:
+        for trace in fig.data:
+            name = getattr(trace, "name", None)
+            if name in SERIES_COLOR_MAP:
+                trace.marker.color = SERIES_COLOR_MAP[name]
+
+    return fig
 
 
 # =========================================================
@@ -77,43 +326,6 @@ def load_comparison_file(filename):
 
 
 # =========================================================
-# CHART STYLE
-# =========================================================
-
-def apply_chart_style(fig):
-
-    fig.update_layout(
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        margin=dict(
-            l=20,
-            r=20,
-            t=60,
-            b=30
-        ),
-        font=dict(
-            color="#1F2A44"
-        ),
-        title=dict(
-            font=dict(
-                color="#1F2A44",
-                size=18
-            )
-        ),
-        xaxis=dict(
-            showgrid=False,
-            zeroline=False
-        ),
-        yaxis=dict(
-            showgrid=False,
-            zeroline=False
-        )
-    )
-
-    return fig
-
-
-# =========================================================
 # KPI HELPER
 # =========================================================
 
@@ -122,15 +334,14 @@ def show_kpi(
     value,
     description
 ):
+    """Renders a KPI as a native Streamlit bordered card — always
+    renders correctly and stays theme-safe in light and dark mode."""
 
-    st.metric(
-        label,
-        value
-    )
+    with st.container(border=True):
 
-    st.caption(
-        description
-    )
+        st.metric(label, value)
+
+        st.caption(description)
 
 
 # =========================================================
@@ -139,11 +350,9 @@ def show_kpi(
 
 def show_banking_intelligence(df):
 
-    st.subheader(
-        "🏦 Banking Intelligence"
-    )
-
-    st.caption(
+    section_title(
+        "🏦",
+        "Banking Intelligence",
         "Customer, financial, loan, transaction and fraud intelligence."
     )
 
@@ -186,7 +395,7 @@ def show_banking_intelligence(df):
         show_kpi(
             "Total Customers",
             f"{total_customers:,}",
-            "Number of customer records in the banking dataset"
+            "Number of customer records in the banking dataset."
         )
 
     with c2:
@@ -194,7 +403,7 @@ def show_banking_intelligence(df):
         show_kpi(
             "Average Balance",
             f"{avg_balance:,.0f}",
-            "Average customer account balance"
+            "Average customer account balance across the dataset."
         )
 
     with c3:
@@ -202,7 +411,7 @@ def show_banking_intelligence(df):
         show_kpi(
             "Average Credit Score",
             f"{avg_credit:.0f}",
-            "Average credit score across customers"
+            "Average credit score across all customers."
         )
 
     with c4:
@@ -210,7 +419,7 @@ def show_banking_intelligence(df):
         show_kpi(
             "High Churn Risk",
             f"{high_churn:,}",
-            "Customers classified with high churn risk"
+            "Customers classified with high churn risk."
         )
 
     st.divider()
@@ -219,9 +428,7 @@ def show_banking_intelligence(df):
     # CUSTOMER ANALYTICS
     # =====================================================
 
-    st.subheader(
-        "Customer Analytics"
-    )
+    section_title("👤", "Customer Analytics")
 
     c1, c2 = st.columns(2)
 
@@ -244,10 +451,11 @@ def show_banking_intelligence(df):
                 segment,
                 x="Segment",
                 y="Customers",
-                title="Customer Segment Distribution"
+                title="Customer Segment Distribution",
+                color_discrete_sequence=CATEGORICAL_SEQUENCE,
             )
 
-            fig = apply_chart_style(fig)
+            fig = apply_banking_chart_theme(fig)
 
             st.plotly_chart(
                 fig,
@@ -273,10 +481,11 @@ def show_banking_intelligence(df):
                 churn,
                 x="Risk",
                 y="Customers",
-                title="Churn Risk Distribution"
+                title="Churn Risk Distribution",
+                color_discrete_sequence=CATEGORICAL_SEQUENCE,
             )
 
-            fig = apply_chart_style(fig)
+            fig = apply_banking_chart_theme(fig)
 
             st.plotly_chart(
                 fig,
@@ -287,9 +496,7 @@ def show_banking_intelligence(df):
     # FINANCIAL ANALYTICS
     # =====================================================
 
-    st.subheader(
-        "Financial Analytics"
-    )
+    section_title("💳", "Financial Analytics")
 
     c1, c2 = st.columns(2)
 
@@ -304,10 +511,11 @@ def show_banking_intelligence(df):
                 df,
                 x="avg_income",
                 y="avg_balance",
-                title="Income vs Average Balance"
+                title="Income vs Average Balance",
+                color_discrete_sequence=[COLORS["primary"]],
             )
 
-            fig = apply_chart_style(fig)
+            fig = apply_banking_chart_theme(fig)
 
             st.plotly_chart(
                 fig,
@@ -325,10 +533,11 @@ def show_banking_intelligence(df):
                 df,
                 x="avg_credit_score",
                 y="avg_dti_ratio",
-                title="Credit Score vs DTI Ratio"
+                title="Credit Score vs DTI Ratio",
+                color_discrete_sequence=[COLORS["accent"]],
             )
 
-            fig = apply_chart_style(fig)
+            fig = apply_banking_chart_theme(fig)
 
             st.plotly_chart(
                 fig,
@@ -339,9 +548,7 @@ def show_banking_intelligence(df):
     # LOAN ANALYTICS
     # =====================================================
 
-    st.subheader(
-        "Loan & Credit Analytics"
-    )
+    section_title("🏷️", "Loan & Credit Analytics")
 
     c1, c2 = st.columns(2)
 
@@ -353,10 +560,11 @@ def show_banking_intelligence(df):
                 df,
                 x="total_loan_amount",
                 nbins=20,
-                title="Total Loan Amount Distribution"
+                title="Total Loan Amount Distribution",
+                color_discrete_sequence=[COLORS["primary"]],
             )
 
-            fig = apply_chart_style(fig)
+            fig = apply_banking_chart_theme(fig)
 
             st.plotly_chart(
                 fig,
@@ -374,10 +582,11 @@ def show_banking_intelligence(df):
                 df,
                 x="avg_loan_amount",
                 y="avg_credit_score",
-                title="Loan Amount vs Credit Score"
+                title="Loan Amount vs Credit Score",
+                color_discrete_sequence=[COLORS["accent"]],
             )
 
-            fig = apply_chart_style(fig)
+            fig = apply_banking_chart_theme(fig)
 
             st.plotly_chart(
                 fig,
@@ -388,9 +597,7 @@ def show_banking_intelligence(df):
     # TRANSACTION ANALYTICS
     # =====================================================
 
-    st.subheader(
-        "Transaction & Fraud Analytics"
-    )
+    section_title("🔐", "Transaction & Fraud Analytics")
 
     c1, c2 = st.columns(2)
 
@@ -405,10 +612,11 @@ def show_banking_intelligence(df):
                 df,
                 x="transaction_count",
                 y="total_transaction_amount",
-                title="Transactions vs Transaction Amount"
+                title="Transactions vs Transaction Amount",
+                color_discrete_sequence=[COLORS["primary"]],
             )
 
-            fig = apply_chart_style(fig)
+            fig = apply_banking_chart_theme(fig)
 
             st.plotly_chart(
                 fig,
@@ -446,10 +654,11 @@ def show_banking_intelligence(df):
             fraud_data,
             x="Metric",
             y="Count",
-            title="Fraud & New Device Activity"
+            title="Fraud & New Device Activity",
+            color_discrete_sequence=CATEGORICAL_SEQUENCE,
         )
 
-        fig = apply_chart_style(fig)
+        fig = apply_banking_chart_theme(fig)
 
         st.plotly_chart(
             fig,
@@ -466,11 +675,9 @@ def show_synthetic_data(
     synthetic_df
 ):
 
-    st.subheader(
-        "🧬 Synthetic Banking Data"
-    )
-
-    st.caption(
+    section_title(
+        "🧬",
+        "Synthetic Banking Data",
         "CTGAN-generated banking records and the final expanded dataset."
     )
 
@@ -536,7 +743,7 @@ def show_synthetic_data(
         show_kpi(
             "Original Records",
             f"{original_records:,}",
-            "Records available before synthetic generation"
+            "Records available before synthetic generation."
         )
 
     with c2:
@@ -544,7 +751,7 @@ def show_synthetic_data(
         show_kpi(
             "Synthetic Records",
             f"{synthetic_records:,}",
-            "New records generated using CTGAN"
+            "New records generated using CTGAN."
         )
 
     with c3:
@@ -552,7 +759,7 @@ def show_synthetic_data(
         show_kpi(
             "Expanded Records",
             f"{expanded_records:,}",
-            "Original records plus generated synthetic records"
+            "Original records plus generated synthetic records."
         )
 
     with c4:
@@ -560,7 +767,7 @@ def show_synthetic_data(
         show_kpi(
             "Expansion Factor",
             f"{expansion_factor:.1f}×",
-            "Final dataset size compared with original dataset"
+            "Final dataset size compared with the original dataset."
         )
 
     with c5:
@@ -568,7 +775,7 @@ def show_synthetic_data(
         show_kpi(
             "Dataset Columns",
             f"{len(expanded_df.columns):,}",
-            "Features available in the final expanded dataset"
+            "Features available in the final expanded dataset."
         )
 
     st.divider()
@@ -577,50 +784,27 @@ def show_synthetic_data(
     # GENERATION SUMMARY
     # =====================================================
 
-    st.subheader(
-        "Synthetic Data Generation"
-    )
+    section_title("🧪", "Synthetic Data Generation")
 
-    summary_col1, summary_col2, summary_col3 = st.columns(3)
+    with st.container(border=True):
 
-    with summary_col1:
+        c1, c2 = st.columns([4, 1])
 
-        st.info(
-            f"""
-            **Original Banking Dataset**
+        with c1:
 
-            {original_records:,} records
+            st.caption(
+                f"Original {original_records:,} records were used as the "
+                f"basis for CTGAN synthetic data generation, producing "
+                f"{synthetic_records:,} new records and a final expanded "
+                f"dataset of {expanded_records:,} records."
+            )
 
-            Source records used as the basis
-            for synthetic data generation.
-            """
-        )
+        with c2:
 
-    with summary_col2:
-
-        st.info(
-            f"""
-            **CTGAN Generated Data**
-
-            {synthetic_records:,} records
-
-            New synthetic banking records
-            generated from learned data patterns.
-            """
-        )
-
-    with summary_col3:
-
-        st.success(
-            f"""
-            **Final Expanded Dataset**
-
-            {expanded_records:,} records
-
-            Original and synthetic records
-            combined into one final dataset.
-            """
-        )
+            st.markdown(
+                badge(f"{expanded_records:,} total", "success"),
+                unsafe_allow_html=True
+            )
 
     st.divider()
 
@@ -628,11 +812,9 @@ def show_synthetic_data(
     # SYNTHETIC DATA ANALYTICS
     # =====================================================
 
-    st.subheader(
-        "Synthetic Banking Analytics"
-    )
-
-    st.caption(
+    section_title(
+        "📈",
+        "Synthetic Banking Analytics",
         f"Analytics are based on the final {expanded_records:,}-record expanded dataset."
     )
 
@@ -667,10 +849,11 @@ def show_synthetic_data(
             title="Customer Age Distribution",
             labels={
                 age_column: "Customer Age"
-            }
+            },
+            color_discrete_sequence=[COLORS["primary"]],
         )
 
-        fig = apply_chart_style(fig)
+        fig = apply_banking_chart_theme(fig)
 
         st.plotly_chart(
             fig,
@@ -708,10 +891,11 @@ def show_synthetic_data(
             title="Credit Score Distribution",
             labels={
                 credit_column: "Credit Score"
-            }
+            },
+            color_discrete_sequence=[COLORS["accent"]],
         )
 
-        fig = apply_chart_style(fig)
+        fig = apply_banking_chart_theme(fig)
 
         st.plotly_chart(
             fig,
@@ -738,9 +922,7 @@ def show_synthetic_data(
 
     if available_financial:
 
-        st.subheader(
-            "Synthetic Financial Metrics"
-        )
+        section_title("💰", "Synthetic Financial Metrics")
 
         financial_values = []
 
@@ -766,10 +948,11 @@ def show_synthetic_data(
             financial_df,
             x="Metric",
             y="Average",
-            title="Average Financial Metrics"
+            title="Average Financial Metrics",
+            color_discrete_sequence=CATEGORICAL_SEQUENCE,
         )
 
-        fig = apply_chart_style(fig)
+        fig = apply_banking_chart_theme(fig)
 
         st.plotly_chart(
             fig,
@@ -811,9 +994,7 @@ def show_synthetic_data(
 
     if available_categories:
 
-        st.subheader(
-            "Banking Category Distribution"
-        )
+        section_title("🗂️", "Banking Category Distribution")
 
         chart_columns = st.columns(2)
 
@@ -839,10 +1020,11 @@ def show_synthetic_data(
                 title=column.replace(
                     "_",
                     " "
-                ).title()
+                ).title(),
+                color_discrete_sequence=CATEGORICAL_SEQUENCE,
             )
 
-            fig = apply_chart_style(fig)
+            fig = apply_banking_chart_theme(fig)
 
             with chart_columns[
                 index % 2
@@ -859,19 +1041,35 @@ def show_synthetic_data(
     # EXPANDED DATASET PREVIEW
     # =====================================================
 
-    st.subheader(
-        "Expanded Banking Dataset Preview"
-    )
+    section_title("🔎", "Expanded Banking Dataset Preview")
 
-    st.caption(
-        f"Showing the first 20 records from the final {expanded_records:,}-record dataset."
-    )
+    with st.container(border=True):
 
-    st.dataframe(
-        expanded_df.head(20),
-        use_container_width=True,
-        hide_index=True
-    )
+        c1, c2 = st.columns([4, 1])
+
+        with c1:
+
+            st.caption(
+                f"Preview of the currently loaded expanded dataset — "
+                f"{expanded_records:,} records available."
+            )
+
+        with c2:
+
+            st.markdown(
+                badge(f"{expanded_records:,} records", "success"),
+                unsafe_allow_html=True
+            )
+
+        with st.expander(
+            "🔎 View sample rows"
+        ):
+
+            st.dataframe(
+                expanded_df.head(20),
+                use_container_width=True,
+                hide_index=True
+            )
 
     st.divider()
 
@@ -879,11 +1077,9 @@ def show_synthetic_data(
     # DOWNLOAD BUTTONS
     # =====================================================
 
-    st.subheader(
-        "Download Banking Datasets"
-    )
-
-    st.caption(
+    section_title(
+        "⬇️",
+        "Download Banking Datasets",
         "Download either the newly generated synthetic records or the complete expanded dataset."
     )
 
@@ -902,16 +1098,15 @@ def show_synthetic_data(
         )
 
         st.download_button(
-            label="⬇️ Download Synthetic Banking Data",
+            label=(
+                f"⬇️ Download Synthetic Banking Data "
+                f"({synthetic_records:,} records)"
+            ),
             data=synthetic_csv,
             file_name="synthetic_banking_large.csv",
             mime="text/csv",
             use_container_width=True,
             key="banking_large_synthetic_download"
-        )
-
-        st.caption(
-            f"{synthetic_records:,} CTGAN-generated synthetic records"
         )
 
     # -----------------------------------------------------
@@ -927,7 +1122,10 @@ def show_synthetic_data(
         )
 
         st.download_button(
-            label="⬇️ Download Original + Synthetic Data",
+            label=(
+                f"⬇️ Download Original + Synthetic "
+                f"({expanded_records:,} records)"
+            ),
             data=expanded_csv,
             file_name="banking_expanded.csv",
             mime="text/csv",
@@ -935,9 +1133,11 @@ def show_synthetic_data(
             key="banking_original_synthetic_expanded_download"
         )
 
-        st.caption(
-            f"{expanded_records:,} total records: original + synthetic"
-        )
+    st.caption(
+        f"Combined dataset contains "
+        f"{original_records:,} original + "
+        f"{synthetic_records:,} synthetic records."
+    )
 
 
 # =========================================================
@@ -949,12 +1149,10 @@ def show_comparison(
     synthetic_df
 ):
 
-    st.subheader(
-        "📊 Real vs Synthetic Banking"
-    )
-
-    st.caption(
-        "Direct comparison between the original banking dataset and the currently generated synthetic dataset."
+    section_title(
+        "📊",
+        "Real vs Synthetic Banking",
+        "Direct comparison between the original banking dataset and the generated synthetic dataset."
     )
 
     # =====================================================
@@ -964,40 +1162,12 @@ def show_comparison(
     real_records = len(real_df)
     synthetic_records = len(synthetic_df)
 
-    c1, c2, c3 = st.columns(3)
-
-    with c1:
-
-        show_kpi(
-            "Real Records",
-            f"{real_records:,}",
-            "Records in the original banking dataset"
+    if real_records > 0:
+        generation_ratio = (
+            synthetic_records / real_records
         )
-
-    with c2:
-
-        show_kpi(
-            "Synthetic Records",
-            f"{synthetic_records:,}",
-            "Records in the currently generated synthetic dataset"
-        )
-
-    with c3:
-
-        if real_records > 0:
-            generation_ratio = (
-                synthetic_records / real_records
-            )
-        else:
-            generation_ratio = 0
-
-        show_kpi(
-            "Generation Ratio",
-            f"{generation_ratio:.1f}×",
-            "Synthetic records generated relative to original records"
-        )
-
-    st.divider()
+    else:
+        generation_ratio = 0
 
     # =====================================================
     # NUMERIC COLUMNS
@@ -1035,7 +1205,275 @@ def show_comparison(
     ]
 
     # =====================================================
-    # MEAN COMPARISON
+    # DISTRIBUTION SCORE
+    # =====================================================
+
+    distribution_scores = []
+
+    for column in available:
+
+        real_values = pd.to_numeric(
+            real_df[column],
+            errors="coerce"
+        ).dropna()
+
+        synthetic_values = pd.to_numeric(
+            synthetic_df[column],
+            errors="coerce"
+        ).dropna()
+
+        if len(real_values) == 0:
+            continue
+
+        if len(synthetic_values) == 0:
+            continue
+
+        real_mean = real_values.mean()
+        synthetic_mean = synthetic_values.mean()
+
+        real_std = real_values.std()
+        synthetic_std = synthetic_values.std()
+
+        mean_similarity = 1 - (
+            abs(
+                real_mean
+                - synthetic_mean
+            )
+            /
+            (
+                abs(real_mean)
+                + 1e-8
+            )
+        )
+
+        std_similarity = 1 - (
+            abs(
+                real_std
+                - synthetic_std
+            )
+            /
+            (
+                abs(real_std)
+                + 1e-8
+            )
+        )
+
+        score = (
+            max(0, mean_similarity) * 0.5
+            +
+            max(0, std_similarity) * 0.5
+        )
+
+        distribution_scores.append(
+            score
+        )
+
+    if distribution_scores:
+
+        distribution_score = (
+            np.mean(
+                distribution_scores
+            )
+            * 100
+        )
+
+    else:
+
+        distribution_score = 0
+
+    distribution_score = max(
+        0,
+        min(
+            100,
+            distribution_score
+        )
+    )
+
+    # =====================================================
+    # CORRELATION SCORE
+    # =====================================================
+
+    if len(available) >= 2:
+
+        real_corr = (
+            real_df[
+                available
+            ]
+            .apply(
+                pd.to_numeric,
+                errors="coerce"
+            )
+            .corr()
+        )
+
+        synthetic_corr = (
+            synthetic_df[
+                available
+            ]
+            .apply(
+                pd.to_numeric,
+                errors="coerce"
+            )
+            .corr()
+        )
+
+        corr_difference = (
+            abs(
+                real_corr
+                - synthetic_corr
+            )
+        )
+
+        upper = np.triu(
+            np.ones(
+                corr_difference.shape
+            ),
+            k=1
+        ).astype(bool)
+
+        values = (
+            corr_difference
+            .where(upper)
+            .stack()
+        )
+
+        if len(values) > 0:
+
+            avg_difference = values.mean()
+
+            correlation_score = (
+                1
+                - avg_difference
+            ) * 100
+
+        else:
+
+            correlation_score = 0
+
+    else:
+
+        correlation_score = 0
+
+    correlation_score = max(
+        0,
+        min(
+            100,
+            correlation_score
+        )
+    )
+
+    # =====================================================
+    # OVERALL SIMILARITY
+    # =====================================================
+
+    overall_score = (
+        distribution_score * 0.5
+        +
+        correlation_score * 0.5
+    )
+
+    overall_score = max(
+        0,
+        min(
+            100,
+            overall_score
+        )
+    )
+
+    # =====================================================
+    # SUMMARY CARDS
+    # =====================================================
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+
+    with c1:
+
+        show_kpi(
+            "Real Records",
+            f"{real_records:,}",
+            "Records in the original banking dataset."
+        )
+
+    with c2:
+
+        show_kpi(
+            "Synthetic Records",
+            f"{synthetic_records:,}",
+            "Records in the currently generated synthetic dataset."
+        )
+
+    with c3:
+
+        show_kpi(
+            "Generation Ratio",
+            f"{generation_ratio:.1f}×",
+            "Synthetic records generated relative to the original records."
+        )
+
+    with c4:
+
+        show_kpi(
+            "Distribution Score",
+            f"{distribution_score:.1f}%",
+            "Measures how closely synthetic numerical distributions match the real dataset."
+        )
+
+    with c5:
+
+        show_kpi(
+            "Overall Similarity",
+            f"{overall_score:.1f}%",
+            "Combined similarity score based on distribution and correlation patterns."
+        )
+
+    st.divider()
+
+    # =====================================================
+    # QUALITY SCORE DETAILS
+    # =====================================================
+
+    section_title("✅", "Synthetic Data Quality")
+
+    if overall_score >= 80:
+        quality_badge = badge("Excellent match", "success")
+    elif overall_score >= 60:
+        quality_badge = badge("Reasonable match", "warning")
+    else:
+        quality_badge = badge("Needs review", "danger")
+
+    st.markdown(quality_badge, unsafe_allow_html=True)
+    st.write("")
+
+    q1, q2, q3 = st.columns(3)
+
+    with q1:
+
+        show_kpi(
+            "Distribution Similarity",
+            f"{distribution_score:.1f}%",
+            "Similarity of numerical means and standard deviations between real and synthetic data."
+        )
+
+    with q2:
+
+        show_kpi(
+            "Correlation Similarity",
+            f"{correlation_score:.1f}%",
+            "Similarity of relationships between numerical banking variables."
+        )
+
+    with q3:
+
+        show_kpi(
+            "Common Numeric Features",
+            f"{len(available):,}",
+            "Number of numerical features available in both real and synthetic datasets."
+        )
+
+    st.divider()
+
+    # =====================================================
+    # MEAN COMPARISON TABLE
     # =====================================================
 
     comparison = pd.DataFrame(
@@ -1064,9 +1502,7 @@ def show_comparison(
     # KEY FINANCIAL METRICS
     # =====================================================
 
-    st.subheader(
-        "Key Financial Metrics"
-    )
+    section_title("🔑", "Key Financial Metrics")
 
     selected = [
         "avg_balance",
@@ -1106,15 +1542,11 @@ def show_comparison(
             y="Value",
             color="Dataset",
             barmode="group",
-            text_auto=".2s",
-            title="Key Financial Metrics — Real vs Current Synthetic"
+            title="Key Financial Metrics — Real vs Synthetic",
+            color_discrete_map=SERIES_COLOR_MAP,
         )
 
-        fig = apply_chart_style(fig)
-
-        fig.update_traces(
-            textposition="outside"
-        )
+        fig = apply_banking_chart_theme(fig)
 
         st.plotly_chart(
             fig,
@@ -1125,9 +1557,7 @@ def show_comparison(
     # CUSTOMER METRICS
     # =====================================================
 
-    st.subheader(
-        "Customer Metrics"
-    )
+    section_title("👤", "Customer Metrics")
 
     selected = [
         "age",
@@ -1167,15 +1597,11 @@ def show_comparison(
             y="Value",
             color="Dataset",
             barmode="group",
-            text_auto=".2s",
-            title="Customer Metrics — Real vs Current Synthetic"
+            title="Customer Metrics — Real vs Synthetic",
+            color_discrete_map=SERIES_COLOR_MAP,
         )
 
-        fig = apply_chart_style(fig)
-
-        fig.update_traces(
-            textposition="outside"
-        )
+        fig = apply_banking_chart_theme(fig)
 
         st.plotly_chart(
             fig,
@@ -1186,9 +1612,7 @@ def show_comparison(
     # FINANCIAL DISTRIBUTION COMPARISON
     # =====================================================
 
-    st.subheader(
-        "Financial Distribution Comparison"
-    )
+    section_title("📉", "Financial Distribution Comparison")
 
     distribution_columns = [
         "avg_balance",
@@ -1249,10 +1673,11 @@ def show_comparison(
                 title=column.replace(
                     "_",
                     " "
-                ).title() + " Distribution"
+                ).title() + " Distribution",
+                color_discrete_map=SERIES_COLOR_MAP,
             )
 
-            fig = apply_chart_style(fig)
+            fig = apply_banking_chart_theme(fig)
 
             with (
                 c1
@@ -1269,9 +1694,7 @@ def show_comparison(
     # CATEGORICAL COMPARISON
     # =====================================================
 
-    st.subheader(
-        "Categorical Distribution"
-    )
+    section_title("🗂️", "Categorical Distribution")
 
     categorical = [
         "segment",
@@ -1279,123 +1702,118 @@ def show_comparison(
         "primary_channel"
     ]
 
-    c1, c2 = st.columns(2)
+    categorical = [
+        col
+        for col in categorical
+        if col in real_df.columns
+        and col in synthetic_df.columns
+    ]
 
-    chart_index = 0
+    if categorical:
 
-    for column in categorical:
+        c1, c2 = st.columns(2)
 
-        if column not in real_df.columns:
-            continue
+        for index, column in enumerate(categorical):
 
-        if column not in synthetic_df.columns:
-            continue
-
-        # -----------------------------------------------
-        # REAL
-        # -----------------------------------------------
-
-        real_counts = (
-            real_df[column]
-            .astype(str)
-            .value_counts(
-                normalize=True
-            )
-            .mul(100)
-            .reset_index()
-        )
-
-        real_counts.columns = [
-            "Category",
-            "Percentage"
-        ]
-
-        real_counts["Dataset"] = "Real"
-
-        # -----------------------------------------------
-        # SYNTHETIC
-        # -----------------------------------------------
-
-        synthetic_counts = (
-            synthetic_df[column]
-            .astype(str)
-            .value_counts(
-                normalize=True
-            )
-            .mul(100)
-            .reset_index()
-        )
-
-        synthetic_counts.columns = [
-            "Category",
-            "Percentage"
-        ]
-
-        synthetic_counts["Dataset"] = "Synthetic"
-
-        # -----------------------------------------------
-        # COMBINE
-        # -----------------------------------------------
-
-        combined = pd.concat(
-            [
-                real_counts,
-                synthetic_counts
-            ],
-            ignore_index=True
-        )
-
-        fig = px.bar(
-            combined,
-            x="Category",
-            y="Percentage",
-            color="Dataset",
-            barmode="group",
-            text_auto=".1f",
-            title=column.replace(
-                "_",
-                " "
-            ).title() +
-            " — Real vs Synthetic"
-        )
-
-        fig.update_yaxes(
-            title="Percentage (%)"
-        )
-
-        fig = apply_chart_style(fig)
-
-        fig.update_traces(
-            textposition="outside"
-        )
-
-        if chart_index % 2 == 0:
-
-            with c1:
-
-                st.plotly_chart(
-                    fig,
-                    use_container_width=True
+            real_counts = (
+                real_df[column]
+                .astype(str)
+                .value_counts(
+                    normalize=True
                 )
+                .mul(100)
+                .reset_index()
+            )
 
-        else:
+            real_counts.columns = [
+                "Category",
+                "Percentage"
+            ]
 
-            with c2:
+            real_counts["Dataset"] = "Real"
 
-                st.plotly_chart(
-                    fig,
-                    use_container_width=True
+            synthetic_counts = (
+                synthetic_df[column]
+                .astype(str)
+                .value_counts(
+                    normalize=True
                 )
+                .mul(100)
+                .reset_index()
+            )
 
-        chart_index += 1
+            synthetic_counts.columns = [
+                "Category",
+                "Percentage"
+            ]
+
+            synthetic_counts["Dataset"] = "Synthetic"
+
+            combined = pd.concat(
+                [
+                    real_counts,
+                    synthetic_counts
+                ],
+                ignore_index=True
+            )
+
+            fig = px.bar(
+                combined,
+                x="Category",
+                y="Percentage",
+                color="Dataset",
+                barmode="group",
+                title=column.replace(
+                    "_",
+                    " "
+                ).title() +
+                " — Real vs Synthetic",
+                color_discrete_map=SERIES_COLOR_MAP,
+            )
+
+            fig.update_yaxes(
+                title="Percentage (%)"
+            )
+
+            fig = apply_banking_chart_theme(fig)
+
+            if index % 2 == 0:
+
+                with c1:
+
+                    st.plotly_chart(
+                        fig,
+                        use_container_width=True
+                    )
+
+            else:
+
+                with c2:
+
+                    st.plotly_chart(
+                        fig,
+                        use_container_width=True
+                    )
+
+    # =====================================================
+    # FULL NUMERIC COMPARISON
+    # =====================================================
+
+    with st.expander(
+        "🔎 View Full Numeric Comparison"
+    ):
+
+        st.dataframe(
+            comparison,
+            use_container_width=True,
+            hide_index=True
+        )
 
     # =====================================================
     # DATASET STATISTICS
     # =====================================================
 
-    st.subheader(
-        "Dataset Statistics"
-    )
+    section_title("📐", "Dataset Statistics")
 
     statistics = pd.DataFrame(
         {
@@ -1451,15 +1869,22 @@ def show_comparison(
         mime="text/csv",
         use_container_width=True,
         key="banking_comparison_download"
-    )# =========================================================
+    )
+
+
+# =========================================================
 # MAIN BANKING DASHBOARD
 # =========================================================
 
 def show_banking_dashboard():
 
+    inject_custom_css()
+
     try:
 
-        real_df, synthetic_df = load_data()
+        real_df, synthetic_df = (
+            load_data()
+        )
 
     except Exception as e:
 
@@ -1469,18 +1894,30 @@ def show_banking_dashboard():
 
         return
 
-    st.title(
-        "🏦 Banking Intelligence"
+    # =====================================================
+    # HEADER
+    # =====================================================
+
+    page_header(
+        "🏦 Banking Intelligence",
+        "Banking analytics, synthetic data generation results and real-vs-synthetic evaluation."
+    )
+
+    synthetic_source = (
+        LARGE_SYNTHETIC_PATH
+        if os.path.exists(LARGE_SYNTHETIC_PATH)
+        else SYNTHETIC_PATH
     )
 
     st.caption(
-        "Banking analytics, synthetic data generation results and real-vs-synthetic evaluation."
+        f"Current synthetic dataset: "
+        f"{len(synthetic_df):,} records — source `{synthetic_source}`"
     )
 
     st.divider()
 
     # =====================================================
-    # THREE TABS
+    # MAIN TABS
     # =====================================================
 
     tab1, tab2, tab3 = st.tabs(
@@ -1522,4 +1959,3 @@ def show_banking_dashboard():
             real_df,
             synthetic_df
         )
-
